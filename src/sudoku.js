@@ -17,23 +17,25 @@
 // by elimination once the other boxes are settled.
 
 import { CATEGORIES, MEMBERS } from './categories.js';
+import { shuffle, range, neighbours } from './util.js';
+import { regularRegions, irregularRegions } from './regions.js';
 
+/**
+ * Board geometry only. Which squares belong to which area is deliberately not
+ * here: irregular boards decide that per puzzle, so it lives on the puzzle.
+ */
 export class Rules {
   constructor(N, boxW, boxH) {
     this.N = N;
     this.boxW = boxW;
     this.boxH = boxH;
     this.cells = N * N;
-    this.hasBoxes = true;
     this.boxCols = N / boxW;
     this.boxRows = N / boxH;
     this.boxCount = this.boxCols * this.boxRows;
     this.boxSize = boxW * boxH;
-    // one square per box is reserved as a clue, so it can never be cut into a piece
+    // one square per area is reserved as a clue, so it can never become a piece
     this.maxPieces = Math.floor((this.cells - this.boxCount) / 4);
-
-    this.boxCells = Array.from({ length: this.boxCount }, () => []);
-    for (let i = 0; i < this.cells; i++) this.boxCells[this.box(i)].push(i);
   }
   idx(r, c) {
     return r * this.N + c;
@@ -43,9 +45,6 @@ export class Rules {
   }
   col(i) {
     return i % this.N;
-  }
-  box(i) {
-    return ((this.row(i) / this.boxH) | 0) * this.boxCols + ((this.col(i) / this.boxW) | 0);
   }
 }
 
@@ -93,38 +92,9 @@ export const SIZES = {
   },
 };
 
-export function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+export { mulberry32 } from './util.js';
 
-function shuffle(arr, rng) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-const range = (n) => Array.from({ length: n }, (_, k) => k);
-
-function neighbours(R, i) {
-  const r = R.row(i);
-  const c = R.col(i);
-  const out = [];
-  if (r > 0) out.push(i - R.N);
-  if (r < R.N - 1) out.push(i + R.N);
-  if (c > 0) out.push(i - 1);
-  if (c < R.N - 1) out.push(i + 1);
-  return out;
-}
-
-// --- cutting a box into tetrominoes ----------------------------------------
+// --- cutting the grid into tetrominoes -------------------------------------
 
 /** Grow a connected blob of `size` cells, never leaving `free`. */
 function growBlob(R, free, seed, size, rng) {
@@ -192,21 +162,21 @@ function tile(R, blocked, rng) {
  * a blind box is only blind if nothing shows through it, and both the leftover
  * squares and any piece we decline to keep would show.
  */
-function attemptCut(R, rng, wantPieces, darkCount, strict) {
-  const dark = new Set(shuffle(range(R.boxCount), rng).slice(0, darkCount));
+function attemptCut(R, R2, rng, wantPieces, darkCount, strict) {
+  const dark = new Set(shuffle(range(R2.count), rng).slice(0, darkCount));
 
-  // every lit box keeps one square back, so it always declares its category
+  // every lit area keeps one square back, so it always declares its category
   const reserved = new Set();
-  for (let b = 0; b < R.boxCount; b++) {
+  for (let b = 0; b < R2.count; b++) {
     if (dark.has(b)) continue;
-    const cells = R.boxCells[b];
+    const cells = R2.boxCells[b];
     reserved.add(cells[(rng() * cells.length) | 0]);
   }
 
   const { blobs, orphans } = tile(R, reserved, rng);
-  if (orphans.some((i) => dark.has(R.box(i)))) return null;
+  if (orphans.some((i) => dark.has(R2.boxOf[i]))) return null;
 
-  const reachesDark = (blob) => blob.some((i) => dark.has(R.box(i)));
+  const reachesDark = (blob) => blob.some((i) => dark.has(R2.boxOf[i]));
   const forced = blobs.filter(reachesDark);
   const spare = shuffle(
     blobs.filter((b) => !reachesDark(b)),
@@ -223,22 +193,25 @@ function attemptCut(R, rng, wantPieces, darkCount, strict) {
   for (const blob of blobs) {
     if (!keptSet.has(blob)) for (const i of blob) clueCells.add(i);
   }
-  for (const i of clueCells) if (dark.has(R.box(i))) return null;
+  for (const i of clueCells) if (dark.has(R2.boxOf[i])) return null;
 
   return { kept: shuffle(kept, rng), clueCells, dark: [...dark].sort((a, b) => a - b) };
 }
 
 export function makePuzzle(R, rng, spec) {
-  const wantPieces = Math.max(1, spec.count);
-  // at least one box must stay lit, or there is nothing to reason from
-  const wantDark = Math.min(spec.dark || 0, Math.max(0, R.boxCount - 1));
+  const regions =
+    (spec.irregular ? irregularRegions(R, rng) : null) || regularRegions(R);
 
-  // one category per box, and the distinct members that fill it
-  const boxCat = shuffle(range(CATEGORIES.length), rng).slice(0, R.boxCount);
+  const wantPieces = Math.max(1, Math.min(spec.count, R.maxPieces));
+  // at least one area must stay lit, or there is nothing to reason from
+  const wantDark = Math.min(spec.dark || 0, Math.max(0, regions.count - 1));
+
+  // one category per area, and the distinct members that fill it
+  const boxCat = shuffle(range(CATEGORIES.length), rng).slice(0, regions.count);
   const value = new Int8Array(R.cells);
   const variant = new Int8Array(R.cells);
-  for (let b = 0; b < R.boxCount; b++) {
-    const cells = R.boxCells[b];
+  for (let b = 0; b < regions.count; b++) {
+    const cells = regions.boxCells[b];
     const members = shuffle(range(MEMBERS), rng).slice(0, cells.length);
     cells.forEach((i, n) => {
       value[i] = boxCat[b] + 1;
@@ -247,11 +220,11 @@ export function makePuzzle(R, rng, spec) {
   }
 
   // Where the clues fall is left to the cut, which now and then dumps most of
-  // them into one box and hands it over. So take several workable cuts and
+  // them into one area and hands it over. So take several workable cuts and
   // keep the one that spreads them most evenly.
   const spread = (plan) => {
-    const per = new Array(R.boxCount).fill(0);
-    for (const i of plan.clueCells) per[R.box(i)]++;
+    const per = new Array(regions.count).fill(0);
+    for (const i of plan.clueCells) per[regions.boxOf[i]]++;
     return { worst: Math.max(...per), lumpiness: per.reduce((a, n) => a + n * n, 0) };
   };
   const better = (a, b) =>
@@ -259,20 +232,20 @@ export function makePuzzle(R, rng, spec) {
       ? a.score.worst < b.score.worst
       : a.score.lumpiness < b.score.lumpiness;
 
-  // fewer blind boxes is a better outcome than a puzzle we failed to build,
+  // fewer blind areas is a better outcome than a puzzle we failed to build,
   // so step down rather than give up, and finally accept fewer pieces
   let plan = null;
   for (let dark = wantDark; dark >= 0 && !plan; dark--) {
     let found = 0;
     for (let attempt = 0; attempt < 240 && found < 12; attempt++) {
-      const cand = attemptCut(R, rng, wantPieces, dark, true);
+      const cand = attemptCut(R, regions, rng, wantPieces, dark, true);
       if (!cand) continue;
       found++;
       cand.score = spread(cand);
       if (!plan || better(cand, plan)) plan = cand;
     }
   }
-  if (!plan) plan = attemptCut(R, rng, wantPieces, 0, false);
+  if (!plan) plan = attemptCut(R, regions, rng, wantPieces, 0, false);
 
   const clues = [...plan.clueCells]
     .sort((a, b) => a - b)
@@ -290,7 +263,7 @@ export function makePuzzle(R, rng, spec) {
     };
   });
 
-  return { boxCat, value, variant, clues, pieces, dark: plan.dark };
+  return { regions, boxCat, value, variant, clues, pieces, dark: plan.dark };
 }
 
 // --- geometry helpers shared by state + view -------------------------------

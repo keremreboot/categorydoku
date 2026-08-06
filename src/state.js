@@ -21,7 +21,8 @@ export class Game {
     this.rules = rules;
     this.puzzle = puzzle;
     this.clues = puzzle.clues;
-    this.boxCat = puzzle.boxCat; // box index -> category index
+    this.regions = puzzle.regions; // which squares make up each area
+    this.boxCat = puzzle.boxCat; // area index -> category index
 
     this.pieces = puzzle.pieces.map((p) => ({
       id: p.id,
@@ -159,7 +160,7 @@ export class Game {
    * which is the only fair way to judge a box that never said what it was.
    */
   boxReference(b) {
-    const cells = this.rules.boxCells[b];
+    const cells = this.regions.boxCells[b];
     for (const i of cells) if (this.clueValue[i]) return this.clueValue[i];
     const tally = new Map();
     let ref = 0;
@@ -178,12 +179,11 @@ export class Game {
 
   /** Cell indices out of keeping with their box, or repeating a picture in it. */
   conflicts() {
-    const R = this.rules;
     const bad = new Set();
-    for (let b = 0; b < R.boxCount; b++) {
+    for (let b = 0; b < this.regions.count; b++) {
       const ref = this.boxReference(b);
       const seen = new Map();
-      for (const i of R.boxCells[b]) {
+      for (const i of this.regions.boxCells[b]) {
         if (this.owner[i] === EMPTY) continue;
         if (ref && this.value[i] !== ref) bad.add(i);
         // identity is the picture, not the category, so a stray piece that

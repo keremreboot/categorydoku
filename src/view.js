@@ -148,76 +148,136 @@ export class View {
   // --- layout --------------------------------------------------------------
 
   /**
-   * Shelf-pack the tray for a given piece scale and tray box.
-   * Returns the slots plus the tray height that scale needs.
+   * Pack the tray across its short side and let it run off the long one, which
+   * is what makes the strip scrollable: in portrait that is columns filling
+   * downward and continuing rightward, in landscape rows the other way about.
+   * Returns the slots and how far the content reaches along the scroll axis.
    */
-  packTray(scale, tx, ty, tw) {
+  packTray(scale, tray, axis, caption, pad) {
+    const gap = 0.24;
     const order = this.game.pieces
       .map((p) => ({ p, e: extent(p.base) }))
       .sort((a, b) => b.e.h - a.e.h || b.e.w - a.e.w);
 
-    const pad = 0.34;
-    const gap = 0.26;
-    const caption = 0.9; // room under the tray's rule for the label
     const slots = new Map();
-    let x = tx + pad;
-    let y = ty + caption;
-    let rowH = 0;
+    let x = tray.x + pad;
+    let y = tray.y + caption;
+    let band = 0;
     for (const { p, e } of order) {
       const w = e.w * scale;
       const h = e.h * scale;
-      if (x > tx + pad && x + w > tx + tw - pad) {
-        x = tx + pad;
-        y += rowH + gap;
-        rowH = 0;
+      if (axis === 'x') {
+        if (y > tray.y + caption && y + h > tray.y + tray.h - pad) {
+          y = tray.y + caption;
+          x += band + gap;
+          band = 0;
+        }
+        slots.set(p.id, { x, y });
+        y += h + gap;
+        band = Math.max(band, w);
+      } else {
+        if (x > tray.x + pad && x + w > tray.x + tray.w - pad) {
+          x = tray.x + pad;
+          y += band + gap;
+          band = 0;
+        }
+        slots.set(p.id, { x, y });
+        x += w + gap;
+        band = Math.max(band, h);
       }
-      slots.set(p.id, { x, y });
-      x += w + gap;
-      rowH = Math.max(rowH, h);
     }
-    return { slots, h: y + rowH + pad - ty };
+    const length = axis === 'x' ? x + band + pad - tray.x : y + band + pad - tray.y;
+    return { slots, length };
   }
 
   /**
-   * Pick the tray scale and shape that leaves both the board squares and the
-   * tray squares as large as possible. Board cells want ~40px for a fingertip,
-   * tray cells a little less since you only have to hit them, not read them.
+   * The board gets a guaranteed share of the screen and the tray takes what is
+   * left, scrolling rather than growing. Sizing the tray to hold every piece at
+   * once was what used to squeeze the board on a phone -- twenty pieces meant a
+   * tray half the height of the screen, and squares too small to hit.
    */
   layout() {
     if (!this.game) return;
     const N = this.rules.N;
     const cw = this.cssW;
     const ch = this.cssH;
-    const portrait = cw / ch < 1.15;
-    const gap = portrait ? 0.5 : 0.75;
     const margin = 6;
+    const availW = Math.max(1, cw - 2 * margin);
+    const availH = Math.max(1, ch - 2 * margin);
+    const portrait = cw / ch < 1.15;
+    const gap = portrait ? 0.4 : 0.6;
 
-    const scales = [0.9, 0.82, 0.74, 0.66, 0.58, 0.5, 0.44, 0.38];
-    const widths = portrait ? [N] : [N * 0.4, N * 0.5, N * 0.62, N * 0.78, N];
-
-    let best = null;
-    for (const ts of scales) {
-      for (const tw of widths) {
-        const tx = portrait ? 0 : N + gap;
-        const ty = portrait ? N + gap : 0;
-        const packed = this.packTray(ts, tx, ty, tw);
-        const W = Math.max(N, tx + tw);
-        const H = Math.max(N, ty + packed.h);
-        // clamped so a collapsed (zero-sized) container cannot invert the scale
-        const s = Math.max(1, Math.min((cw - 2 * margin) / W, (ch - 2 * margin) / H));
-        const score = Math.min(s / 40, (s * ts) / 24);
-        if (!best || score > best.score) {
-          best = { score, s, ts, tx, ty, tw, th: packed.h, slots: packed.slots, W, H };
-        }
+    let S;
+    let tray;
+    let axis;
+    if (portrait) {
+      // never let the board fall below 62% of the height
+      S = Math.max(1, Math.min(availW / N, (availH * 0.62) / N));
+      tray = { x: 0, y: N + gap, w: N, h: Math.max(2.4, availH / S - N - gap) };
+      axis = 'x';
+    } else {
+      const byHeight = availH / N;
+      let trayW = availW / byHeight - N - gap;
+      if (trayW < 3.4) {
+        S = Math.max(1, availW / (N + gap + 3.4));
+        trayW = 3.4;
+      } else {
+        S = Math.max(1, byHeight);
+        trayW = Math.min(trayW, N * 0.85);
       }
+      tray = { x: N + gap, y: 0, w: trayW, h: N };
+      axis = 'y';
     }
 
-    this.S = best.s;
-    this.ox = (cw - best.W * best.s) / 2;
-    this.oy = (ch - best.H * best.s) / 2;
-    this.trayScale = best.ts;
-    this.tray = { x: best.tx, y: best.ty, w: best.tw, h: best.th };
-    this.slots = best.slots;
+    // Tray squares want about 26px so a fingertip can find them; that is a
+    // floor, not a target. Above it, take the largest size whose pieces all fit
+    // in view, so a roomy screen shows big tiles and no scrollbar, and only a
+    // cramped one has to scroll.
+    const caption = 0.78;
+    const pad = 0.28;
+    const across = axis === 'x' ? tray.h - caption - pad : tray.w - 2 * pad;
+    const window = axis === 'x' ? tray.w : tray.h;
+    const floor = Math.min(0.78, Math.max(0.34, 26 / S), across / 4);
+
+    let ts = floor;
+    let packed = null;
+    for (const cand of [0.78, 0.72, 0.66, 0.6, 0.54, 0.48, 0.42, 0.38]) {
+      if (cand < floor || cand > across / 4) continue;
+      const trial = this.packTray(cand, tray, axis, caption, pad);
+      if (trial.length <= window) {
+        ts = cand;
+        packed = trial;
+        break;
+      }
+    }
+    if (!packed) packed = this.packTray(ts, tray, axis, caption, pad);
+
+    this.S = S;
+    this.trayScale = ts;
+    this.tray = tray;
+    this.trayAxis = axis;
+    this.trayCaption = caption;
+    this.slots = packed.slots;
+    this.trayLength = packed.length;
+    this.trayWindow = axis === 'x' ? tray.w : tray.h;
+    this.maxScroll = Math.max(0, packed.length - this.trayWindow);
+    this.trayScroll = Math.min(this.trayScroll || 0, this.maxScroll);
+
+    const W = portrait ? N : tray.x + tray.w;
+    const H = portrait ? tray.y + tray.h : Math.max(N, tray.h);
+    this.ox = (cw - W * S) / 2;
+    this.oy = (ch - H * S) / 2;
+  }
+
+  /** Pan the tray strip. Returns whether anything actually moved. */
+  setTrayScroll(value) {
+    const next = Math.max(0, Math.min(this.maxScroll, value));
+    if (next === this.trayScroll) return false;
+    this.trayScroll = next;
+    for (const p of this.game.pieces) {
+      if (!p.placed && p.id !== this.heldId) this.syncPiece(p, true);
+    }
+    return true;
   }
 
   resize() {
@@ -245,7 +305,13 @@ export class View {
       pv.target = { x: piece.c, y: piece.r, s: 1, lift: 0 };
     } else {
       const slot = this.slots.get(piece.id) ?? { x: this.tray.x, y: this.tray.y };
-      pv.target = { x: slot.x, y: slot.y, s: this.trayScale, lift: 0 };
+      const shift = this.trayScroll || 0;
+      pv.target = {
+        x: slot.x - (this.trayAxis === 'x' ? shift : 0),
+        y: slot.y - (this.trayAxis === 'y' ? shift : 0),
+        s: this.trayScale,
+        lift: 0,
+      };
     }
     if (immediate) pv.pos = { ...pv.target };
   }
@@ -312,8 +378,60 @@ export class View {
     this.drawBoard(ctx);
     this.drawGhost(ctx);
 
-    for (const pv of this.pieceViews) if (pv.id !== this.heldId) this.drawPiece(ctx, pv);
+    // Tray pieces are clipped so a scrolled-away piece cannot show up outside
+    // the strip. The clip is loosened on the other axis, so a piece flying home
+    // from the board is not chopped off mid-flight.
+    const S = this.S;
+    const t = this.tray;
+    const slack = 0.6;
+    ctx.save();
+    ctx.beginPath();
+    if (this.trayAxis === 'x') {
+      ctx.rect(this.px(t.x), this.py(t.y - slack), t.w * S, (t.h + slack) * S);
+    } else {
+      ctx.rect(this.px(t.x - slack), this.py(t.y), (t.w + slack) * S, t.h * S);
+    }
+    ctx.clip();
+    for (const pv of this.pieceViews) {
+      if (pv.id !== this.heldId && !this.game.pieces[pv.id].placed) this.drawPiece(ctx, pv);
+    }
+    ctx.restore();
+
+    for (const pv of this.pieceViews) {
+      if (pv.id !== this.heldId && this.game.pieces[pv.id].placed) this.drawPiece(ctx, pv);
+    }
     if (this.heldId != null) this.drawPiece(ctx, this.pieceViews[this.heldId]);
+    this.drawScrollBar(ctx);
+  }
+
+  /** A hint that the strip runs past its window, and how far along you are. */
+  drawScrollBar(ctx) {
+    if (this.maxScroll <= 0.001) return;
+    const S = this.S;
+    const t = this.tray;
+    const along = this.trayWindow / this.trayLength;
+    const at = this.trayScroll / this.trayLength;
+    const thick = Math.max(3, S * 0.07);
+    const inset = S * 0.25;
+
+    ctx.save();
+    ctx.fillStyle = PALETTE.ink;
+    if (this.trayAxis === 'x') {
+      const trackW = t.w * S - 2 * inset;
+      const y = this.py(t.y + t.h) - thick - inset * 0.5;
+      ctx.globalAlpha = 0.14;
+      ctx.fillRect(this.px(t.x) + inset, y, trackW, thick);
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(this.px(t.x) + inset + trackW * at, y, trackW * along, thick);
+    } else {
+      const trackH = t.h * S - 2 * inset;
+      const x = this.px(t.x + t.w) - thick - inset * 0.5;
+      ctx.globalAlpha = 0.14;
+      ctx.fillRect(x, this.py(t.y) + inset, thick, trackH);
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(x, this.py(t.y) + inset + trackH * at, thick, trackH * along);
+    }
+    ctx.restore();
   }
 
   drawBoard(ctx) {
@@ -341,22 +459,42 @@ export class View {
       ctx.fillRect(cx, cy, S, S);
     }
 
+    // Hairlines between squares, heavy strokes wherever two areas meet. Walking
+    // the shared edges rather than the column indices is what lets an irregular
+    // board draw itself with the same code as a rectangular one.
     ctx.strokeStyle = PALETTE.ink;
     ctx.lineCap = 'butt';
-    const heavy = (k, span) => k === 0 || k === N || (R.hasBoxes && k % span === 0);
-    const rule = (thick, ax, ay, bx, by) => {
-      ctx.lineWidth = thick ? Math.max(2, S * 0.055) : Math.max(1, S * 0.018);
-      ctx.globalAlpha = thick ? 1 : 0.5;
-      ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(bx, by);
-      ctx.stroke();
-    };
-    for (let k = 0; k <= N; k++) {
-      rule(heavy(k, R.boxW), x0 + k * S, y0, x0 + k * S, y0 + side);
-      rule(heavy(k, R.boxH), x0, y0 + k * S, x0 + side, y0 + k * S);
+    ctx.lineWidth = Math.max(1, S * 0.018);
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath();
+    for (let k = 1; k < N; k++) {
+      ctx.moveTo(x0 + k * S, y0);
+      ctx.lineTo(x0 + k * S, y0 + side);
+      ctx.moveTo(x0, y0 + k * S);
+      ctx.lineTo(x0 + side, y0 + k * S);
     }
+    ctx.stroke();
     ctx.globalAlpha = 1;
+
+    const boxOf = this.game.regions.boxOf;
+    ctx.lineWidth = Math.max(2, S * 0.055);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let i = 0; i < R.cells; i++) {
+      const r = R.row(i);
+      const c = R.col(i);
+      if (c < N - 1 && boxOf[i] !== boxOf[i + 1]) {
+        ctx.moveTo(x0 + (c + 1) * S, y0 + r * S);
+        ctx.lineTo(x0 + (c + 1) * S, y0 + (r + 1) * S);
+      }
+      if (r < N - 1 && boxOf[i] !== boxOf[i + N]) {
+        ctx.moveTo(x0 + c * S, y0 + (r + 1) * S);
+        ctx.lineTo(x0 + (c + 1) * S, y0 + (r + 1) * S);
+      }
+    }
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    ctx.strokeRect(x0, y0, side, side);
 
     for (const cl of this.game.clues) {
       if (!this.game.isClueVisible(cl.i)) continue;
@@ -390,22 +528,22 @@ export class View {
     ctx.lineWidth = Math.max(1.2, S * 0.035);
     ctx.strokeRect(x + 2, y + 2, w - 4, h - 4);
 
-    const cap = Math.max(9, Math.min(15, S * 0.32));
+    const cap = Math.max(9, Math.min(14, S * 0.3));
+    const left = this.game.pieces.filter((p) => !p.placed).length;
     ctx.fillStyle = PALETTE.ink;
     ctx.font = `600 ${cap}px ${SERIF}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const label = this.game.pieces.every((p) => p.placed) ? 'TRAY EMPTY' : 'THE PIECES';
     ctx.save();
-    ctx.letterSpacing = `${(cap * 0.35).toFixed(1)}px`;
-    ctx.fillText(label, x + w / 2, y + cap * 1.5);
+    ctx.letterSpacing = `${(cap * 0.3).toFixed(1)}px`;
+    ctx.fillText(left ? `${left} TO PLACE` : 'TRAY EMPTY', x + w / 2, y + cap * 1.2);
     ctx.restore();
 
     ctx.globalAlpha = 0.75;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(x + S * 0.3, y + cap * 2.5);
-    ctx.lineTo(x + w - S * 0.3, y + cap * 2.5);
+    ctx.moveTo(x + S * 0.25, y + cap * 2.1);
+    ctx.lineTo(x + w - S * 0.25, y + cap * 2.1);
     ctx.stroke();
     ctx.globalAlpha = 1;
   }

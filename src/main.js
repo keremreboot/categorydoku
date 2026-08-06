@@ -10,9 +10,10 @@ const view = new View(canvas);
 
 const ui = {};
 for (const id of [
-  'status', 'clues', 'banner', 'size', 'difficulty', 'rotatable',
+  'status', 'clues', 'banner', 'size', 'difficulty', 'rotatable', 'irregular',
   'newGame', 'undo', 'rotate', 'reset', 'reveal', 'seed', 'blurb', 'legend',
   'keyBtn', 'moreBtn', 'keySheet', 'moreSheet', 'scrim',
+  'hints', 'hintsOut', 'blind', 'blindOut',
 ]) {
   ui[id] = document.getElementById(id);
 }
@@ -24,6 +25,7 @@ const TOUCH_LIFT = 0.95;
 
 let game = null;
 let held = null; // { piece, grabR, grabC, sticky, lift, downX, downY, moved, from }
+let panning = null; // { from, fromY, scroll } while dragging the tray strip
 let pointer = { x: 0, y: 0, has: false };
 let dirty = true;
 
@@ -43,10 +45,14 @@ function loadSettings() {
     saved = {};
   }
   if (saved.size && SIZES[saved.size]) ui.size.value = saved.size;
-  if (saved.difficulty && SIZES[ui.size.value].pieces[saved.difficulty]) {
+  const specs = SIZES[ui.size.value].pieces;
+  if (saved.difficulty === 'custom' || (saved.difficulty && specs[saved.difficulty])) {
     ui.difficulty.value = saved.difficulty;
   }
   if ('rotatable' in saved) ui.rotatable.checked = !!saved.rotatable;
+  if ('irregular' in saved) ui.irregular.checked = !!saved.irregular;
+  if (saved.hints != null) ui.hints.value = String(saved.hints);
+  if (saved.blind != null) ui.blind.value = String(saved.blind);
 }
 
 function saveSettings() {
@@ -57,6 +63,9 @@ function saveSettings() {
         size: ui.size.value,
         difficulty: ui.difficulty.value,
         rotatable: ui.rotatable.checked,
+        irregular: ui.irregular.checked,
+        hints: +ui.hints.value,
+        blind: +ui.blind.value,
       })
     );
   } catch {
@@ -77,6 +86,7 @@ function currentSize() {
 function syncDifficultyLabels() {
   const specs = currentSize().pieces;
   for (const opt of ui.difficulty.options) {
+    if (opt.value === 'custom') continue;
     const spec = specs[opt.value];
     opt.disabled = !spec;
     if (!spec) {
@@ -85,9 +95,91 @@ function syncDifficultyLabels() {
     }
     const n = spec.count;
     const base = `${n} piece${n === 1 ? '' : 's'} — ${opt.dataset.name}`;
-    opt.textContent = spec.dark ? `${base}, ${spec.dark} blind boxes` : base;
+    opt.textContent = spec.dark ? `${base}, ${spec.dark} blind areas` : base;
   }
-  if (!specs[ui.difficulty.value]) ui.difficulty.value = 'hard';
+  if (ui.difficulty.value !== 'custom' && !specs[ui.difficulty.value]) {
+    ui.difficulty.value = 'hard';
+  }
+}
+
+// --- manual difficulty -----------------------------------------------------
+//
+// The sliders are the same setting seen from the player's side: hints are what
+// the cut leaves behind, so cells = 4 * pieces + hints ties them together
+// exactly. Stepping hints by four keeps that identity whole, which is why the
+// slider counts in fours rather than ones.
+
+function hintsToPieces(hints) {
+  const R = currentSize().rules;
+  return Math.max(1, Math.round((R.cells - hints) / 4));
+}
+
+/** Slider bounds depend on the board and on how many areas are going blind. */
+function syncSliderRanges() {
+  const R = currentSize().rules;
+  const areas = R.boxCount;
+
+  ui.blind.max = String(Math.max(0, areas - 1));
+  ui.blind.disabled = areas < 2;
+  if (+ui.blind.value > +ui.blind.max) ui.blind.value = ui.blind.max;
+
+  // every lit area must keep a square back, so that is the floor on hints
+  const lit = areas - +ui.blind.value;
+  const minHints = R.cells - 4 * Math.floor((R.cells - lit) / 4);
+  const maxHints = R.cells - 4; // one lonely piece
+  ui.hints.min = String(minHints);
+  ui.hints.max = String(Math.max(minHints, maxHints));
+  ui.hints.step = '4';
+  if (+ui.hints.value < minHints) ui.hints.value = String(minHints);
+  if (+ui.hints.value > maxHints) ui.hints.value = String(maxHints);
+
+  const pieces = hintsToPieces(+ui.hints.value);
+  ui.hintsOut.textContent = `${ui.hints.value} · ${pieces} piece${pieces === 1 ? '' : 's'}`;
+  ui.blindOut.textContent = ui.blind.disabled ? 'n/a' : ui.blind.value;
+}
+
+/**
+ * Report what was actually built. At the dense end the cut cannot always reach
+ * the piece count asked for, and a crowded board cannot always take every
+ * blind area, so the sliders would otherwise promise something the board does
+ * not deliver. Shown as "asked -> got" whenever the two part company.
+ */
+function syncSliderResult(puzzle) {
+  const gotHints = puzzle.clues.length;
+  const n = puzzle.pieces.length;
+  const asked = +ui.hints.value;
+  ui.hintsOut.textContent =
+    `${asked === gotHints ? gotHints : `${asked} → ${gotHints}`} · ${n} piece${n === 1 ? '' : 's'}`;
+  if (!ui.blind.disabled) {
+    const gotDark = puzzle.dark.length;
+    const askedDark = +ui.blind.value;
+    ui.blindOut.textContent = askedDark === gotDark ? `${gotDark}` : `${askedDark} → ${gotDark}`;
+  }
+}
+
+/** Move the sliders to match whatever preset is selected. */
+function syncSlidersFromPreset() {
+  const spec = currentSize().pieces[ui.difficulty.value];
+  if (!spec) return;
+  const R = currentSize().rules;
+  // widen first: a range input silently clamps a value to its current bounds,
+  // so assigning before the bounds are right quietly loses the preset
+  ui.blind.max = String(Math.max(0, R.boxCount - 1));
+  ui.hints.min = '0';
+  ui.hints.max = String(R.cells);
+  ui.blind.value = String(spec.dark || 0);
+  ui.hints.value = String(R.cells - 4 * spec.count);
+  syncSliderRanges();
+}
+
+/** What the generator should build, preset or hand-dialled. */
+function currentSpec() {
+  const irregular = ui.irregular.checked;
+  if (ui.difficulty.value === 'custom') {
+    return { count: hintsToPieces(+ui.hints.value), dark: +ui.blind.value, irregular };
+  }
+  const spec = currentSize().pieces[ui.difficulty.value] ?? currentSize().pieces.hard;
+  return { ...spec, irregular };
 }
 
 /** The key lists only the categories this puzzle actually uses. */
@@ -114,20 +206,20 @@ function buildLegend() {
 function newGame(seed = (Math.random() * 1e9) | 0) {
   const size = currentSize();
   const rng = mulberry32(seed);
-  const puzzle = makePuzzle(size.rules, rng, size.pieces[ui.difficulty.value]);
+  const puzzle = makePuzzle(size.rules, rng, currentSpec());
   game = new Game(size.rules, puzzle);
   held = null;
   view.setPuzzle(game);
   view.setGhost(null);
   ui.seed.textContent = `No. ${String(seed).slice(-6).padStart(6, '0')}`;
-  // say it out loud: a box with no grey squares is deliberate, not a bug
+  // say it out loud: an area with no grey squares is deliberate, not a bug
   const blind = puzzle.dark.length;
-  ui.blurb.textContent = blind
-    ? `${size.blurb} · ${blind} blind`
-    : size.blurb;
+  const shape = puzzle.regions.irregular ? 'irregular areas' : size.blurb;
+  ui.blurb.textContent = blind ? `${shape} · ${blind} blind` : shape;
   ui.banner.classList.remove('show');
   history.replaceState(null, '', `#${seed}`);
   buildLegend();
+  syncSliderResult(puzzle);
   refresh();
 }
 
@@ -301,11 +393,22 @@ canvas.addEventListener('pointerdown', (ev) => {
     held.downX = ev.clientX;
     held.downY = ev.clientY;
     updateHeld();
+    return;
+  }
+  // empty tray background: drag it to scroll the strip
+  if (view.onTray(pointer.x, pointer.y) && view.maxScroll > 0) {
+    panning = { from: pointer.x, fromY: pointer.y, scroll: view.trayScroll };
   }
 });
 
 canvas.addEventListener('pointermove', (ev) => {
   syncPointer(ev);
+  if (panning) {
+    const moved =
+      view.trayAxis === 'x' ? panning.from - pointer.x : panning.fromY - pointer.y;
+    if (view.setTrayScroll(panning.scroll + moved)) mark();
+    return;
+  }
   if (!held) return;
   if (
     held.downX != null &&
@@ -319,10 +422,27 @@ canvas.addEventListener('pointermove', (ev) => {
 
 canvas.addEventListener('pointerup', (ev) => {
   syncPointer(ev);
+  panning = null;
   if (held && !held.sticky) drop();
 });
 
-canvas.addEventListener('pointercancel', () => cancelHeld());
+canvas.addEventListener('pointercancel', () => {
+  panning = null;
+  cancelHeld();
+});
+
+canvas.addEventListener(
+  'wheel',
+  (ev) => {
+    if (view.maxScroll <= 0) return;
+    const w = view.pointerWorld(ev);
+    if (!view.onTray(w.x, w.y)) return;
+    ev.preventDefault();
+    const step = (ev.deltaY + ev.deltaX) / 90;
+    if (view.setTrayScroll(view.trayScroll + step)) mark();
+  },
+  { passive: false }
+);
 
 canvas.addEventListener('contextmenu', (ev) => {
   ev.preventDefault();
@@ -384,18 +504,39 @@ ui.undo.addEventListener('click', doUndo);
 ui.rotate.addEventListener('click', rotateHeld);
 
 ui.difficulty.addEventListener('change', () => {
+  syncSlidersFromPreset();
   saveSettings();
   newGame();
 });
 ui.size.addEventListener('change', () => {
-  saveSettings();
   syncDifficultyLabels();
+  syncSlidersFromPreset();
+  syncSliderRanges();
+  saveSettings();
   newGame();
 });
 ui.rotatable.addEventListener('change', () => {
   saveSettings();
   refresh();
 });
+ui.irregular.addEventListener('change', () => {
+  saveSettings();
+  newGame();
+});
+
+// touching a slider is itself the request to leave the presets behind
+for (const slider of [ui.hints, ui.blind]) {
+  slider.addEventListener('input', () => {
+    ui.difficulty.value = 'custom';
+    syncSliderRanges();
+  });
+  slider.addEventListener('change', () => {
+    ui.difficulty.value = 'custom';
+    syncSliderRanges();
+    saveSettings();
+    newGame();
+  });
+}
 
 ui.reset.addEventListener('click', () => {
   held = null;
@@ -435,6 +576,8 @@ function frame(now) {
 
 loadSettings();
 syncDifficultyLabels();
+if (ui.difficulty.value !== 'custom') syncSlidersFromPreset();
+syncSliderRanges();
 
 const fromHash = parseInt(location.hash.slice(1), 10);
 newGame(Number.isFinite(fromHash) ? fromHash : undefined);

@@ -89,11 +89,26 @@
           <option value="medium" data-name="standard" selected></option>
           <option value="hard" data-name="hard"></option>
           <option value="expert" data-name="expert"></option>
+          <option value="custom" data-name="custom">custom</option>
         </select>
       </label>
 
+      <div class="slider">
+        <label for="hints">Hints <output id="hintsOut"></output></label>
+        <input type="range" id="hints" min="0" max="1" step="1" />
+      </div>
+
+      <div class="slider">
+        <label for="blind">Blind areas <output id="blindOut"></output></label>
+        <input type="range" id="blind" min="0" max="1" step="1" />
+      </div>
+
       <label class="check"
         ><input type="checkbox" id="rotatable" /> <span>Allow rotation</span></label
+      >
+      <label class="check"
+        ><input type="checkbox" id="irregular" />
+        <span>Irregular areas</span></label
       >
 
       <div class="sheet-actions">
@@ -107,10 +122,14 @@
         square, so no finished grid has one.
       </p>
       <p class="sheet-note">
-        <b>Expert</b> leaves some boxes blind: no grey squares at all, and
-        nothing to say what they hold. Read them from the pieces that reach in
-        from a neighbouring box, or work them out by elimination once the rest
-        of the board is settled.
+        A <b>blind</b> area has no grey squares at all, and nothing to say what
+        it holds. Read it from the pieces that reach in from a neighbour, or
+        work it out by elimination once the rest of the board is settled.
+      </p>
+      <p class="sheet-note">
+        <b>Irregular areas</b> replaces the neat boxes with connected shapes of
+        the same size, so you can no longer tell which area a square is in just
+        by looking at where it sits.
       </p>
     </section>
 

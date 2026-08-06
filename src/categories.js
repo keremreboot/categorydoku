@@ -12,6 +12,11 @@
 // stops there, and a missing glyph is not a cosmetic problem -- it draws as an
 // empty box, which is an unreadable square. Check any replacement on the
 // oldest target you care about before swapping it in.
+// Categories must not overlap in meaning, or a square becomes unanswerable.
+// That is why there is no Birds beside Animals and no Food beside Fruit: a
+// penguin would belong to both, and the board would be asking a question with
+// two right answers. Fast food, Party and Office are drawn narrowly for the
+// same reason, and the ruler and scissors sit in Office rather than Tools.
 export const CATEGORIES = [
   { name: 'Animals', icons: ['🐘', '🦁', '🐢', '🦊', '🐸', '🦉', '🐧', '🐍', '🦌'] },
   { name: 'Fruit', icons: ['🍎', '🍌', '🍇', '🍓', '🍍', '🍒', '🥝', '🍑', '🥥'] },
@@ -19,9 +24,18 @@ export const CATEGORIES = [
   { name: 'Sports', icons: ['⚽', '🏀', '🎾', '🏈', '⚾', '🏓', '🏐', '🥊', '⛳'] },
   { name: 'Music', icons: ['🎸', '🎹', '🎺', '🥁', '🎻', '🎤', '🎷', '🪕', '🎧'] },
   { name: 'Weather', icons: ['☀️', '🌧️', '❄️', '⛈️', '🌈', '🌪️', '☁️', '🌩️', '💨'] },
-  { name: 'Tools', icons: ['🔨', '🔧', '⚙️', '🔩', '⛏️', '🪓', '✂️', '🧰', '📏'] },
+  { name: 'Tools', icons: ['🔨', '🔧', '⚙️', '🔩', '⛏️', '🪓', '🔦', '🧰', '🧲'] },
   { name: 'Space', icons: ['🪐', '🌙', '⭐', '☄️', '🔭', '🛸', '🌍', '🌌', '👽'] },
   { name: 'Plants', icons: ['🌵', '🌻', '🌳', '🍀', '🌷', '🍄', '🌹', '🌴', '🌾'] },
+  { name: 'Fast food', icons: ['🍕', '🍔', '🌭', '🌮', '🍟', '🥪', '🍿', '🥞', '🧇'] },
+  { name: 'Drinks', icons: ['☕', '🍵', '🍺', '🍷', '🥤', '🍾', '🧃', '🥛', '🍸'] },
+  { name: 'Clothing', icons: ['👕', '👖', '👗', '👞', '🧢', '🧤', '🧣', '👔', '🥾'] },
+  { name: 'Buildings', icons: ['🏠', '🏰', '🏯', '🏥', '🏫', '🏦', '⛪', '🗼', '🏭'] },
+  { name: 'Faces', icons: ['😀', '😢', '😡', '😱', '😴', '😍', '🤔', '😎', '🥶'] },
+  { name: 'Hands', icons: ['👍', '👎', '👋', '✊', '✌️', '👌', '🤝', '🙌', '👏'] },
+  { name: 'Money', icons: ['💰', '💵', '💳', '💎', '🏧', '💸', '💶', '💷', '💴'] },
+  { name: 'Office', icons: ['✏️', '📎', '📌', '📖', '📓', '🖊️', '📏', '✂️', '📊'] },
+  { name: 'Party', icons: ['🎉', '🎊', '🎈', '🎁', '🎂', '🍰', '🎀', '🎇', '🎆'] },
 ];
 
 /** Members per category. A 3 x 3 box has nine squares, so this must be nine. */

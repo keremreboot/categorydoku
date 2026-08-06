@@ -304,6 +304,37 @@ button.ghost {
   margin: 0;
 }
 
+.slider {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.4rem 0;
+}
+
+.slider label {
+  display: flex;
+  justify-content: space-between;
+  min-height: 0;
+  padding: 0;
+}
+
+.slider output {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  text-transform: none;
+}
+
+.slider input[type="range"] {
+  width: 100%;
+  min-height: 34px;
+  accent-color: var(--ink);
+}
+
+.slider input:disabled {
+  opacity: 0.35;
+}
+
 .sheet-actions {
   display: flex;
   gap: 0.5rem;
