@@ -12,16 +12,40 @@ other, is what tells you where it belongs.
 
 ## Rules
 
-- Every square in a box must come from that box's category.
+- Every square in a box must come from one category — whichever it turns out
+  to be, not one decided in advance.
 - No picture may appear twice in the same box.
 - Fill the grid and you have solved it.
 
-One square in every box is held back from the cutting and left showing as a
-clue, so a box always declares what it is. Everything else the cuts leave over
-becomes an extra clue — which is why easier puzzles have more of them.
+One square in every box is normally held back from the cutting and left showing
+as a clue, so a box always declares what it is. Everything else the cuts leave
+over becomes an extra clue — which is why easier puzzles have more of them.
 
 You may park a piece on top of a clue, but burying one always strands an empty
 square somewhere else, so no finished grid has a buried clue.
+
+### Expert: blind boxes
+
+Expert leaves some boxes **blind** — no clue at all, nothing to say what they
+hold. Three of nine on the full board, two of six on the 6 × 6. A blind box is
+read from the pieces that reach into it from a lit neighbour, or by elimination
+once the rest of the board is settled.
+
+This is why the first rule is worded the way it is. A blind box never declares
+a category, so judging it against the one the generator happened to pick would
+mark a perfectly consistent filling as wrong. Instead a box is judged on its
+own: a clue square is taken as the truth, and where there is none, the largest
+group of agreeing squares stands as the reference.
+
+Making a box blind is not just a matter of withholding its clue — leftover
+squares and any piece the generator declines to keep would both show through.
+So a cut is rejected outright unless the blind boxes come out covered edge to
+edge by kept pieces. Several workable cuts are sampled and the one that spreads
+the remaining clues most evenly is kept, so no lit box gets handed over.
+
+The 3 × 3 board has no expert level: a lone box has nothing to deduce from, and
+nine squares never divide into tetrominoes cleanly, so a leftover clue is
+unavoidable.
 
 ## Controls
 

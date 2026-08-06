@@ -43,7 +43,9 @@ function loadSettings() {
     saved = {};
   }
   if (saved.size && SIZES[saved.size]) ui.size.value = saved.size;
-  if (saved.difficulty) ui.difficulty.value = saved.difficulty;
+  if (saved.difficulty && SIZES[ui.size.value].pieces[saved.difficulty]) {
+    ui.difficulty.value = saved.difficulty;
+  }
   if ('rotatable' in saved) ui.rotatable.checked = !!saved.rotatable;
 }
 
@@ -66,13 +68,26 @@ function currentSize() {
   return SIZES[ui.size.value] ?? SIZES[9];
 }
 
-/** Difficulty labels carry the piece count, which differs per board size. */
+/**
+ * Difficulty labels carry the piece count, which differs per board size, and
+ * the blind-box count where there is one. Not every size offers every level --
+ * a one-box board has nothing to go blind -- so missing levels are disabled,
+ * and a selection that just vanished falls back rather than generating null.
+ */
 function syncDifficultyLabels() {
-  const counts = currentSize().pieces;
+  const specs = currentSize().pieces;
   for (const opt of ui.difficulty.options) {
-    const n = counts[opt.value];
-    opt.textContent = `${n} piece${n === 1 ? '' : 's'} — ${opt.dataset.name}`;
+    const spec = specs[opt.value];
+    opt.disabled = !spec;
+    if (!spec) {
+      opt.textContent = `${opt.dataset.name} — n/a on this board`;
+      continue;
+    }
+    const n = spec.count;
+    const base = `${n} piece${n === 1 ? '' : 's'} — ${opt.dataset.name}`;
+    opt.textContent = spec.dark ? `${base}, ${spec.dark} blind boxes` : base;
   }
+  if (!specs[ui.difficulty.value]) ui.difficulty.value = 'hard';
 }
 
 /** The key lists only the categories this puzzle actually uses. */
@@ -105,7 +120,11 @@ function newGame(seed = (Math.random() * 1e9) | 0) {
   view.setPuzzle(game);
   view.setGhost(null);
   ui.seed.textContent = `No. ${String(seed).slice(-6).padStart(6, '0')}`;
-  ui.blurb.textContent = size.blurb;
+  // say it out loud: a box with no grey squares is deliberate, not a bug
+  const blind = puzzle.dark.length;
+  ui.blurb.textContent = blind
+    ? `${size.blurb} · ${blind} blind`
+    : size.blurb;
   ui.banner.classList.remove('show');
   history.replaceState(null, '', `#${seed}`);
   buildLegend();

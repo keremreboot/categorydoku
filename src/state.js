@@ -151,23 +151,50 @@ export class Game {
     return true;
   }
 
-  /** Cell indices that are in the wrong box, or repeat a picture within one. */
+  /**
+   * The category a box is settling on. A clue square is the truth outright.
+   * A blind box has none, so the largest agreeing group of squares stands as
+   * the reference and the rest read as the mistake -- the rule is that a box
+   * holds one category, not that it holds the one we happened to generate,
+   * which is the only fair way to judge a box that never said what it was.
+   */
+  boxReference(b) {
+    const cells = this.rules.boxCells[b];
+    for (const i of cells) if (this.clueValue[i]) return this.clueValue[i];
+    const tally = new Map();
+    let ref = 0;
+    let best = 0;
+    for (const i of cells) {
+      if (this.owner[i] === EMPTY) continue;
+      const n = (tally.get(this.value[i]) || 0) + 1;
+      tally.set(this.value[i], n);
+      if (n > best) {
+        best = n;
+        ref = this.value[i];
+      }
+    }
+    return ref;
+  }
+
+  /** Cell indices out of keeping with their box, or repeating a picture in it. */
   conflicts() {
     const R = this.rules;
     const bad = new Set();
-    const seen = Array.from({ length: R.boxCount }, () => new Map());
-    for (let i = 0; i < R.cells; i++) {
-      if (this.owner[i] === EMPTY) continue;
-      const b = R.box(i);
-      if (this.value[i] - 1 !== this.boxCat[b]) bad.add(i);
-      // identity is the picture, not the category, so a stray piece that
-      // happens to share a member index with a local square still reads wrong
-      const pic = this.value[i] * 16 + this.variant[i];
-      if (seen[b].has(pic)) {
-        bad.add(i);
-        bad.add(seen[b].get(pic));
-      } else {
-        seen[b].set(pic, i);
+    for (let b = 0; b < R.boxCount; b++) {
+      const ref = this.boxReference(b);
+      const seen = new Map();
+      for (const i of R.boxCells[b]) {
+        if (this.owner[i] === EMPTY) continue;
+        if (ref && this.value[i] !== ref) bad.add(i);
+        // identity is the picture, not the category, so a stray piece that
+        // happens to share a member index with a local square still reads wrong
+        const pic = this.value[i] * 16 + this.variant[i];
+        if (seen.has(pic)) {
+          bad.add(i);
+          bad.add(seen.get(pic));
+        } else {
+          seen.set(pic, i);
+        }
       }
     }
     return bad;

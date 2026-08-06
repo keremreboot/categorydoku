@@ -6,9 +6,15 @@
 // or three categories -- reading which ones, and in which arrangement, is what
 // tells you where it goes.
 //
-// One square per box is held back from the cutting and left showing, so every
-// box always declares its own category. Everything else the cuts leave over
+// One square per box is normally held back from the cutting and left showing,
+// so every box declares its own category. Everything else the cuts leave over
 // becomes an extra clue.
+//
+// Expert puzzles leave some boxes *blind*: no square is held back there, and
+// the cut is rejected unless those boxes come out covered edge to edge by kept
+// pieces, so nothing shows through. A blind box never says what it is -- you
+// work it out from the pieces that reach into it from its lit neighbours, or
+// by elimination once the other boxes are settled.
 
 import { CATEGORIES, MEMBERS } from './categories.js';
 
@@ -50,14 +56,25 @@ export const SIZES = {
     key: '3',
     label: '3 × 3',
     rules: new Rules(3, 3, 3),
-    pieces: { easy: 1, medium: 2, hard: 2 },
+    // no expert: a lone box has nothing to deduce from, and 9 squares never
+    // divide into tetrominoes cleanly, so a leftover clue is unavoidable
+    pieces: {
+      easy: { count: 1, dark: 0 },
+      medium: { count: 2, dark: 0 },
+      hard: { count: 2, dark: 0 },
+    },
     blurb: 'one box, one category',
   },
   6: {
     key: '6',
     label: '6 × 6',
     rules: new Rules(6, 3, 2),
-    pieces: { easy: 4, medium: 5, hard: 7 },
+    pieces: {
+      easy: { count: 4, dark: 0 },
+      medium: { count: 5, dark: 0 },
+      hard: { count: 7, dark: 0 },
+      expert: { count: 7, dark: 2 },
+    },
     blurb: 'six boxes, six categories',
   },
   9: {
@@ -66,7 +83,12 @@ export const SIZES = {
     rules: new Rules(9, 3, 3),
     // 18 would need a perfect tiling of all 72 unreserved squares, which the
     // greedy cut misses often enough to make the menu lie about the count
-    pieces: { easy: 10, medium: 14, hard: 17 },
+    pieces: {
+      easy: { count: 10, dark: 0 },
+      medium: { count: 14, dark: 0 },
+      hard: { count: 17, dark: 0 },
+      expert: { count: 17, dark: 3 },
+    },
     blurb: 'nine boxes, nine categories',
   },
 };
@@ -164,7 +186,53 @@ function tile(R, blocked, rng) {
   return { blobs, orphans };
 }
 
-export function makePuzzle(R, rng, pieceCount) {
+/**
+ * One go at cutting the grid for `darkCount` blind boxes. Returns null if the
+ * cut does not work out, because it is far cheaper to re-cut than to repair:
+ * a blind box is only blind if nothing shows through it, and both the leftover
+ * squares and any piece we decline to keep would show.
+ */
+function attemptCut(R, rng, wantPieces, darkCount, strict) {
+  const dark = new Set(shuffle(range(R.boxCount), rng).slice(0, darkCount));
+
+  // every lit box keeps one square back, so it always declares its category
+  const reserved = new Set();
+  for (let b = 0; b < R.boxCount; b++) {
+    if (dark.has(b)) continue;
+    const cells = R.boxCells[b];
+    reserved.add(cells[(rng() * cells.length) | 0]);
+  }
+
+  const { blobs, orphans } = tile(R, reserved, rng);
+  if (orphans.some((i) => dark.has(R.box(i)))) return null;
+
+  const reachesDark = (blob) => blob.some((i) => dark.has(R.box(i)));
+  const forced = blobs.filter(reachesDark);
+  const spare = shuffle(
+    blobs.filter((b) => !reachesDark(b)),
+    rng
+  );
+  const cap = Math.min(wantPieces, blobs.length);
+  if (forced.length > cap) return null;
+
+  const kept = forced.concat(spare.slice(0, cap - forced.length));
+  if (strict && kept.length < wantPieces) return null;
+
+  const keptSet = new Set(kept);
+  const clueCells = new Set([...reserved, ...orphans]);
+  for (const blob of blobs) {
+    if (!keptSet.has(blob)) for (const i of blob) clueCells.add(i);
+  }
+  for (const i of clueCells) if (dark.has(R.box(i))) return null;
+
+  return { kept: shuffle(kept, rng), clueCells, dark: [...dark].sort((a, b) => a - b) };
+}
+
+export function makePuzzle(R, rng, spec) {
+  const wantPieces = Math.max(1, spec.count);
+  // at least one box must stay lit, or there is nothing to reason from
+  const wantDark = Math.min(spec.dark || 0, Math.max(0, R.boxCount - 1));
+
   // one category per box, and the distinct members that fill it
   const boxCat = shuffle(range(CATEGORIES.length), rng).slice(0, R.boxCount);
   const value = new Int8Array(R.cells);
@@ -178,28 +246,39 @@ export function makePuzzle(R, rng, pieceCount) {
     });
   }
 
-  // one square per box never gets cut away, so no box hides what it is
-  const reserved = new Set(R.boxCells.map((cells) => cells[(rng() * cells.length) | 0]));
+  // Where the clues fall is left to the cut, which now and then dumps most of
+  // them into one box and hands it over. So take several workable cuts and
+  // keep the one that spreads them most evenly.
+  const spread = (plan) => {
+    const per = new Array(R.boxCount).fill(0);
+    for (const i of plan.clueCells) per[R.box(i)]++;
+    return { worst: Math.max(...per), lumpiness: per.reduce((a, n) => a + n * n, 0) };
+  };
+  const better = (a, b) =>
+    a.score.worst !== b.score.worst
+      ? a.score.worst < b.score.worst
+      : a.score.lumpiness < b.score.lumpiness;
 
-  const want = Math.max(1, Math.min(pieceCount, R.maxPieces));
-  let best = null;
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const t = tile(R, reserved, rng);
-    if (!best || t.blobs.length > best.blobs.length) best = t;
-    if (best.blobs.length >= want) break;
+  // fewer blind boxes is a better outcome than a puzzle we failed to build,
+  // so step down rather than give up, and finally accept fewer pieces
+  let plan = null;
+  for (let dark = wantDark; dark >= 0 && !plan; dark--) {
+    let found = 0;
+    for (let attempt = 0; attempt < 240 && found < 12; attempt++) {
+      const cand = attemptCut(R, rng, wantPieces, dark, true);
+      if (!cand) continue;
+      found++;
+      cand.score = spread(cand);
+      if (!plan || better(cand, plan)) plan = cand;
+    }
   }
+  if (!plan) plan = attemptCut(R, rng, wantPieces, 0, false);
 
-  const blobs = shuffle(best.blobs.slice(), rng);
-  const kept = blobs.slice(0, Math.min(want, blobs.length));
-
-  const clueCells = new Set([...reserved, ...best.orphans]);
-  for (const b of blobs.slice(kept.length)) for (const i of b) clueCells.add(i);
-
-  const clues = [...clueCells]
+  const clues = [...plan.clueCells]
     .sort((a, b) => a - b)
     .map((i) => ({ r: R.row(i), c: R.col(i), v: value[i], k: variant[i], i }));
 
-  const pieces = kept.map((blob, id) => {
+  const pieces = plan.kept.map((blob, id) => {
     const cells = blob.map((i) => ({ r: R.row(i), c: R.col(i), v: value[i], k: variant[i] }));
     const minR = Math.min(...cells.map((x) => x.r));
     const minC = Math.min(...cells.map((x) => x.c));
@@ -211,7 +290,7 @@ export function makePuzzle(R, rng, pieceCount) {
     };
   });
 
-  return { boxCat, value, variant, clues, pieces };
+  return { boxCat, value, variant, clues, pieces, dark: plan.dark };
 }
 
 // --- geometry helpers shared by state + view -------------------------------
