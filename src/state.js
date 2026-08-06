@@ -1,4 +1,9 @@
-// Board state + sudoku validation. No rendering in here.
+// Board state + rule checking. No rendering in here.
+//
+// Two things make a square wrong: carrying a category that is not its box's,
+// or repeating a picture already somewhere in that box. Both are reported the
+// same way, as a set of offending cell indices, so the view can just paint
+// them red.
 //
 // Clues are placeable-over: a piece may be dropped on a clue square, which
 // buries it. Because pieces + clues tile the grid exactly, burying a clue
@@ -16,6 +21,7 @@ export class Game {
     this.rules = rules;
     this.puzzle = puzzle;
     this.clues = puzzle.clues;
+    this.boxCat = puzzle.boxCat; // box index -> category index
 
     this.pieces = puzzle.pieces.map((p) => ({
       id: p.id,
@@ -145,28 +151,23 @@ export class Game {
     return true;
   }
 
-  /** Cell indices whose category is duplicated in its row, column or box. */
+  /** Cell indices that are in the wrong box, or repeat a picture within one. */
   conflicts() {
     const R = this.rules;
     const bad = new Set();
-    const groups = [];
-    for (let k = 0; k < R.N; k++) groups.push([], [], []);
+    const seen = Array.from({ length: R.boxCount }, () => new Map());
     for (let i = 0; i < R.cells; i++) {
       if (this.owner[i] === EMPTY) continue;
-      groups[R.row(i) * 3].push(i);
-      groups[R.col(i) * 3 + 1].push(i);
-      if (R.hasBoxes) groups[R.box(i) * 3 + 2].push(i);
-    }
-    for (const group of groups) {
-      const seen = new Map();
-      for (const i of group) {
-        const v = this.value[i];
-        if (seen.has(v)) {
-          bad.add(i);
-          bad.add(seen.get(v));
-        } else {
-          seen.set(v, i);
-        }
+      const b = R.box(i);
+      if (this.value[i] - 1 !== this.boxCat[b]) bad.add(i);
+      // identity is the picture, not the category, so a stray piece that
+      // happens to share a member index with a local square still reads wrong
+      const pic = this.value[i] * 16 + this.variant[i];
+      if (seen[b].has(pic)) {
+        bad.add(i);
+        bad.add(seen[b].get(pic));
+      } else {
+        seen[b].set(pic, i);
       }
     }
     return bad;

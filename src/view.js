@@ -5,7 +5,7 @@
 // desktop in landscape -- only where the tray sits changes.
 
 import { extent, outlinePolygon, insetPolygon, interiorSegments } from './sudoku.js';
-import { CATEGORIES, glyph } from './categories.js';
+import { glyph } from './categories.js';
 
 export const PALETTE = {
   table: '#e9e4d8',
@@ -112,7 +112,6 @@ export class View {
     this.heldId = null;
     this.ghost = null;
     this.bad = new Set();
-    this.tinted = false;
 
     // world -> screen
     this.S = 40;
@@ -144,10 +143,6 @@ export class View {
     // y is row, x is col, so the polygon helpers hand back [col, row] pairs
     pv.outline = insetPolygon(outlinePolygon(cells), 0.055);
     pv.segs = interiorSegments(cells);
-  }
-
-  setTinted(on) {
-    this.tinted = on;
   }
 
   // --- layout --------------------------------------------------------------
@@ -306,15 +301,6 @@ export class View {
     ctx.drawImage(iconSprite(v, k), cx - size / 2, cy - size / 2, size, size);
   }
 
-  tintCell(ctx, v, x, y, u, alpha) {
-    const cat = CATEGORIES[v - 1];
-    if (!cat) return;
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = cat.tint;
-    ctx.fillRect(x, y, u, u);
-    ctx.globalAlpha = 1;
-  }
-
   render() {
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -353,7 +339,6 @@ export class View {
       const cy = y0 + cl.r * S;
       ctx.fillStyle = PALETTE.clueTint;
       ctx.fillRect(cx, cy, S, S);
-      if (this.tinted) this.tintCell(ctx, cl.v, cx, cy, S, 0.42);
     }
 
     ctx.strokeStyle = PALETTE.ink;
@@ -485,16 +470,6 @@ export class View {
       ctx.globalAlpha = 0.35;
       ctx.fillStyle = '#ffe9b8';
       ctx.fill();
-      ctx.restore();
-    }
-
-    if (this.tinted) {
-      ctx.save();
-      polyPath(ctx, pts, radius);
-      ctx.clip();
-      for (const cell of pv.cells) {
-        this.tintCell(ctx, cell.v, X + cell.c * u, Y + cell.r * u, u, 0.38);
-      }
       ctx.restore();
     }
 

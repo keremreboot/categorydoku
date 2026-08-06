@@ -1,15 +1,16 @@
-// Puzzle generation, for any of the supported board sizes.
+// Puzzle generation.
 //
-// A categorydoku puzzle is a solved grid cut into tetrominoes, with the
-// leftover cells left showing as clues. N*N is never a multiple of 4 for our
-// sizes, so the clues are not decoration -- they are the remainder that makes
-// the tiling work at all: N*N = 4 * pieces + clues.
+// Each box of the grid is given a category, and its squares are filled with
+// that many *different* members of it. The grid is then cut into tetrominoes
+// freely, across box edges as well as within them, so a piece can straddle two
+// or three categories -- reading which ones, and in which arrangement, is what
+// tells you where it goes.
 //
-// Every cell carries a value (which category) and a variant (which icon from
-// that category). The variant is pure decoration for the rules, but it is what
-// makes the board read as a set of *things* rather than a set of symbols.
+// One square per box is held back from the cutting and left showing, so every
+// box always declares its own category. Everything else the cuts leave over
+// becomes an extra clue.
 
-import { VARIANTS } from './categories.js';
+import { CATEGORIES, MEMBERS } from './categories.js';
 
 export class Rules {
   constructor(N, boxW, boxH) {
@@ -17,9 +18,16 @@ export class Rules {
     this.boxW = boxW;
     this.boxH = boxH;
     this.cells = N * N;
-    this.hasBoxes = boxW > 0 && boxH > 0;
-    this.boxCols = this.hasBoxes ? N / boxW : 0;
-    this.maxPieces = Math.floor(this.cells / 4);
+    this.hasBoxes = true;
+    this.boxCols = N / boxW;
+    this.boxRows = N / boxH;
+    this.boxCount = this.boxCols * this.boxRows;
+    this.boxSize = boxW * boxH;
+    // one square per box is reserved as a clue, so it can never be cut into a piece
+    this.maxPieces = Math.floor((this.cells - this.boxCount) / 4);
+
+    this.boxCells = Array.from({ length: this.boxCount }, () => []);
+    for (let i = 0; i < this.cells; i++) this.boxCells[this.box(i)].push(i);
   }
   idx(r, c) {
     return r * this.N + c;
@@ -31,34 +39,35 @@ export class Rules {
     return i % this.N;
   }
   box(i) {
-    if (!this.hasBoxes) return -1;
     return ((this.row(i) / this.boxH) | 0) * this.boxCols + ((this.col(i) / this.boxW) | 0);
   }
 }
 
-// 3x3 has no sub-boxes -- it is a plain Latin square, which is the point: it
-// teaches "one of each category per row and column" in about thirty seconds.
+// 3 x 3 is a single box -- one category, two pieces and a clue. It teaches the
+// whole idea in about thirty seconds.
 export const SIZES = {
   3: {
     key: '3',
     label: '3 × 3',
-    rules: new Rules(3, 0, 0),
+    rules: new Rules(3, 3, 3),
     pieces: { easy: 1, medium: 2, hard: 2 },
-    blurb: 'one of each category per row and column',
+    blurb: 'one box, one category',
   },
   6: {
     key: '6',
     label: '6 × 6',
     rules: new Rules(6, 3, 2),
-    pieces: { easy: 4, medium: 6, hard: 9 },
-    blurb: 'rows, columns and 3 × 2 boxes',
+    pieces: { easy: 4, medium: 5, hard: 7 },
+    blurb: 'six boxes, six categories',
   },
   9: {
     key: '9',
     label: '9 × 9',
     rules: new Rules(9, 3, 3),
-    pieces: { easy: 10, medium: 14, hard: 18 },
-    blurb: 'rows, columns and 3 × 3 boxes',
+    // 18 would need a perfect tiling of all 72 unreserved squares, which the
+    // greedy cut misses often enough to make the menu lie about the count
+    pieces: { easy: 10, medium: 14, hard: 17 },
+    blurb: 'nine boxes, nine categories',
   },
 };
 
@@ -80,6 +89,8 @@ function shuffle(arr, rng) {
   return arr;
 }
 
+const range = (n) => Array.from({ length: n }, (_, k) => k);
+
 function neighbours(R, i) {
   const r = R.row(i);
   const c = R.col(i);
@@ -91,48 +102,9 @@ function neighbours(R, i) {
   return out;
 }
 
-// --- a random complete solution -------------------------------------------
+// --- cutting a box into tetrominoes ----------------------------------------
 
-export function solvedGrid(R, rng) {
-  const g = new Int8Array(R.cells);
-  const values = Array.from({ length: R.N }, (_, k) => k + 1);
-
-  const fits = (i, v) => {
-    const r = R.row(i);
-    const c = R.col(i);
-    for (let k = 0; k < R.N; k++) {
-      if (g[r * R.N + k] === v) return false;
-      if (g[k * R.N + c] === v) return false;
-    }
-    if (R.hasBoxes) {
-      const br = ((r / R.boxH) | 0) * R.boxH;
-      const bc = ((c / R.boxW) | 0) * R.boxW;
-      for (let dr = 0; dr < R.boxH; dr++) {
-        for (let dc = 0; dc < R.boxW; dc++) {
-          if (g[(br + dr) * R.N + bc + dc] === v) return false;
-        }
-      }
-    }
-    return true;
-  };
-
-  const fill = (i) => {
-    if (i === R.cells) return true;
-    for (const v of shuffle(values.slice(), rng)) {
-      if (!fits(i, v)) continue;
-      g[i] = v;
-      if (fill(i + 1)) return true;
-      g[i] = 0;
-    }
-    return false;
-  };
-
-  fill(0);
-  return g;
-}
-
-// --- cutting the grid into tetrominoes -------------------------------------
-
+/** Grow a connected blob of `size` cells, never leaving `free`. */
 function growBlob(R, free, seed, size, rng) {
   for (let attempt = 0; attempt < 48; attempt++) {
     const blob = new Set([seed]);
@@ -155,11 +127,14 @@ function growBlob(R, free, seed, size, rng) {
   return null;
 }
 
-// Greedy tiling, always seeding from the most-constrained free cell so we
-// strand as few orphans as possible. Orphans just become extra clues.
-function tile(R, rng) {
+/**
+ * Greedy tiling of everything except `blocked`, always seeding from the
+ * most-constrained free square so we strand as few orphans as possible.
+ * Cuts ignore box edges entirely. Orphans just become extra clues.
+ */
+function tile(R, blocked, rng) {
   const free = new Set();
-  for (let i = 0; i < R.cells; i++) free.add(i);
+  for (let i = 0; i < R.cells; i++) if (!blocked.has(i)) free.add(i);
   const blobs = [];
   const orphans = [];
 
@@ -190,15 +165,26 @@ function tile(R, rng) {
 }
 
 export function makePuzzle(R, rng, pieceCount) {
-  const grid = solvedGrid(R, rng);
+  // one category per box, and the distinct members that fill it
+  const boxCat = shuffle(range(CATEGORIES.length), rng).slice(0, R.boxCount);
+  const value = new Int8Array(R.cells);
   const variant = new Int8Array(R.cells);
-  for (let i = 0; i < R.cells; i++) variant[i] = (rng() * VARIANTS) | 0;
+  for (let b = 0; b < R.boxCount; b++) {
+    const cells = R.boxCells[b];
+    const members = shuffle(range(MEMBERS), rng).slice(0, cells.length);
+    cells.forEach((i, n) => {
+      value[i] = boxCat[b] + 1;
+      variant[i] = members[n];
+    });
+  }
+
+  // one square per box never gets cut away, so no box hides what it is
+  const reserved = new Set(R.boxCells.map((cells) => cells[(rng() * cells.length) | 0]));
 
   const want = Math.max(1, Math.min(pieceCount, R.maxPieces));
-
   let best = null;
   for (let attempt = 0; attempt < 40; attempt++) {
-    const t = tile(R, rng);
+    const t = tile(R, reserved, rng);
     if (!best || t.blobs.length > best.blobs.length) best = t;
     if (best.blobs.length >= want) break;
   }
@@ -206,15 +192,15 @@ export function makePuzzle(R, rng, pieceCount) {
   const blobs = shuffle(best.blobs.slice(), rng);
   const kept = blobs.slice(0, Math.min(want, blobs.length));
 
-  const clueCells = new Set(best.orphans);
+  const clueCells = new Set([...reserved, ...best.orphans]);
   for (const b of blobs.slice(kept.length)) for (const i of b) clueCells.add(i);
 
   const clues = [...clueCells]
     .sort((a, b) => a - b)
-    .map((i) => ({ r: R.row(i), c: R.col(i), v: grid[i], k: variant[i], i }));
+    .map((i) => ({ r: R.row(i), c: R.col(i), v: value[i], k: variant[i], i }));
 
   const pieces = kept.map((blob, id) => {
-    const cells = blob.map((i) => ({ r: R.row(i), c: R.col(i), v: grid[i], k: variant[i] }));
+    const cells = blob.map((i) => ({ r: R.row(i), c: R.col(i), v: value[i], k: variant[i] }));
     const minR = Math.min(...cells.map((x) => x.r));
     const minC = Math.min(...cells.map((x) => x.c));
     return {
@@ -225,7 +211,7 @@ export function makePuzzle(R, rng, pieceCount) {
     };
   });
 
-  return { grid, variant, clues, pieces };
+  return { boxCat, value, variant, clues, pieces };
 }
 
 // --- geometry helpers shared by state + view -------------------------------

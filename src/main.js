@@ -10,7 +10,7 @@ const view = new View(canvas);
 
 const ui = {};
 for (const id of [
-  'status', 'clues', 'banner', 'size', 'difficulty', 'rotatable', 'tinted',
+  'status', 'clues', 'banner', 'size', 'difficulty', 'rotatable',
   'newGame', 'undo', 'rotate', 'reset', 'reveal', 'seed', 'blurb', 'legend',
   'keyBtn', 'moreBtn', 'keySheet', 'moreSheet', 'scrim',
 ]) {
@@ -42,11 +42,9 @@ function loadSettings() {
   } catch {
     saved = {};
   }
-  // absent keys keep the markup's default, so a first visit gets the assist on
   if (saved.size && SIZES[saved.size]) ui.size.value = saved.size;
   if (saved.difficulty) ui.difficulty.value = saved.difficulty;
   if ('rotatable' in saved) ui.rotatable.checked = !!saved.rotatable;
-  if ('tinted' in saved) ui.tinted.checked = !!saved.tinted;
 }
 
 function saveSettings() {
@@ -57,7 +55,6 @@ function saveSettings() {
         size: ui.size.value,
         difficulty: ui.difficulty.value,
         rotatable: ui.rotatable.checked,
-        tinted: ui.tinted.checked,
       })
     );
   } catch {
@@ -78,22 +75,20 @@ function syncDifficultyLabels() {
   }
 }
 
+/** The key lists only the categories this puzzle actually uses. */
 function buildLegend() {
-  const N = currentSize().rules.N;
+  const used = [...game.boxCat].sort((a, b) => a - b);
   ui.legend.replaceChildren(
-    ...CATEGORIES.slice(0, N).map((cat) => {
+    ...used.map((ci) => CATEGORIES[ci]).map((cat) => {
       const row = document.createElement('div');
       row.className = 'legend-row';
-      const dot = document.createElement('span');
-      dot.className = 'legend-dot';
-      dot.style.background = cat.tint;
       const name = document.createElement('span');
       name.className = 'legend-name';
       name.textContent = cat.name;
       const icons = document.createElement('span');
       icons.className = 'legend-icons';
       icons.textContent = cat.icons.join(' ');
-      row.append(dot, name, icons);
+      row.append(name, icons);
       return row;
     })
   );
@@ -113,6 +108,7 @@ function newGame(seed = (Math.random() * 1e9) | 0) {
   ui.blurb.textContent = size.blurb;
   ui.banner.classList.remove('show');
   history.replaceState(null, '', `#${seed}`);
+  buildLegend();
   refresh();
 }
 
@@ -125,7 +121,7 @@ function refresh() {
   const open = game.rules.cells - game.filledCount();
   // both warnings matter independently, so never let one mask the other
   const notes = [];
-  if (bad) notes.push(`${bad} clash${bad === 1 ? '' : 'es'}`);
+  if (bad) notes.push(`${bad} square${bad === 1 ? '' : 's'} misplaced`);
   if (buried) notes.push(`${buried} clue${buried === 1 ? '' : 's'} buried`);
   if (!notes.length) notes.push(`${open} square${open === 1 ? '' : 's'} open`);
   ui.clues.textContent = notes.join(' · ');
@@ -375,17 +371,11 @@ ui.difficulty.addEventListener('change', () => {
 ui.size.addEventListener('change', () => {
   saveSettings();
   syncDifficultyLabels();
-  buildLegend();
   newGame();
 });
 ui.rotatable.addEventListener('change', () => {
   saveSettings();
   refresh();
-});
-ui.tinted.addEventListener('change', () => {
-  saveSettings();
-  view.setTinted(ui.tinted.checked);
-  mark();
 });
 
 ui.reset.addEventListener('click', () => {
@@ -426,8 +416,6 @@ function frame(now) {
 
 loadSettings();
 syncDifficultyLabels();
-buildLegend();
-view.setTinted(ui.tinted.checked);
 
 const fromHash = parseInt(location.hash.slice(1), 10);
 newGame(Number.isFinite(fromHash) ? fromHash : undefined);

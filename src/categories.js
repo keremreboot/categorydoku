@@ -1,33 +1,38 @@
-// The nine symbol classes that replace sudoku's nine digits.
+// The categories. One is assigned to each box of the grid, and that box then
+// holds nine *different* members of it -- so every set needs exactly nine, and
+// they have to stay tellable apart at about 30 pixels.
 //
-// A cell no longer says "3", it shows *some* member of category 3. Every icon
-// in a set is interchangeable, so reading the board means recognising what a
-// thing *is* rather than matching a glyph. Boards smaller than 9x9 use the
-// first N categories, which is why the distinctive ones come first.
-
-// Tints are only shown in the optional assist mode, where they are laid over
-// cream paper at low opacity -- so they are picked for separation at a glance
-// rather than for the newsprint palette.
+// No picture appears in two categories: a rocket is a vehicle, never a space
+// thing, or the board would be ambiguous.
+//
+// Nothing is colour-coded. Working out that a fox and an owl are the same kind
+// of thing is the puzzle -- a colour per category would just hand it over.
+//
+// Every glyph here is Unicode 12 or older. Windows 10 ships an emoji font that
+// stops there, and a missing glyph is not a cosmetic problem -- it draws as an
+// empty box, which is an unreadable square. Check any replacement on the
+// oldest target you care about before swapping it in.
 export const CATEGORIES = [
-  { name: 'Animals', tint: '#b5651d', icons: ['🐘', '🦁', '🐢', '🦊', '🐸', '🦉'] },
-  { name: 'Fruit', tint: '#c62828', icons: ['🍎', '🍌', '🍇', '🍓', '🍍', '🍒'] },
-  { name: 'Vehicles', tint: '#1565c0', icons: ['🚗', '🚲', '✈️', '🚂', '🚀', '⛵'] },
-  { name: 'Sports', tint: '#2e7d32', icons: ['⚽', '🏀', '🎾', '🏈', '⚾', '🏓'] },
-  { name: 'Music', tint: '#8e24aa', icons: ['🎸', '🎹', '🎺', '🥁', '🎻', '🎤'] },
-  { name: 'Weather', tint: '#00acc1', icons: ['☀️', '🌧️', '❄️', '⛈️', '🌈', '🌪️'] },
-  { name: 'Tools', tint: '#546e7a', icons: ['🔨', '🔧', '⚙️', '🔩', '⛏️', '🪓'] },
-  { name: 'Space', tint: '#3949ab', icons: ['🪐', '🌙', '⭐', '☄️', '🔭', '🛸'] },
-  { name: 'Plants', tint: '#9e9d24', icons: ['🌵', '🌻', '🌳', '🍀', '🌷', '🍄'] },
+  { name: 'Animals', icons: ['🐘', '🦁', '🐢', '🦊', '🐸', '🦉', '🐧', '🐍', '🦌'] },
+  { name: 'Fruit', icons: ['🍎', '🍌', '🍇', '🍓', '🍍', '🍒', '🥝', '🍑', '🥥'] },
+  { name: 'Vehicles', icons: ['🚗', '🚲', '✈️', '🚂', '🚀', '⛵', '🚁', '🛵', '🚜'] },
+  { name: 'Sports', icons: ['⚽', '🏀', '🎾', '🏈', '⚾', '🏓', '🏐', '🥊', '⛳'] },
+  { name: 'Music', icons: ['🎸', '🎹', '🎺', '🥁', '🎻', '🎤', '🎷', '🪕', '🎧'] },
+  { name: 'Weather', icons: ['☀️', '🌧️', '❄️', '⛈️', '🌈', '🌪️', '☁️', '🌩️', '💨'] },
+  { name: 'Tools', icons: ['🔨', '🔧', '⚙️', '🔩', '⛏️', '🪓', '✂️', '🧰', '📏'] },
+  { name: 'Space', icons: ['🪐', '🌙', '⭐', '☄️', '🔭', '🛸', '🌍', '🌌', '👽'] },
+  { name: 'Plants', icons: ['🌵', '🌻', '🌳', '🍀', '🌷', '🍄', '🌹', '🌴', '🌾'] },
 ];
 
-export const VARIANTS = CATEGORIES[0].icons.length;
+/** Members per category. A 3 x 3 box has nine squares, so this must be nine. */
+export const MEMBERS = 9;
 
-/** Values on the board are 1-based, matching sudoku's 1..N. */
+/** Board values are 1-based, so that 0 can mean "empty". */
 export function category(v) {
   return CATEGORIES[v - 1];
 }
 
-export function glyph(v, variant) {
+export function glyph(v, member) {
   const c = category(v);
-  return c ? c.icons[variant % c.icons.length] : '?';
+  return c ? c.icons[member % c.icons.length] : '?';
 }

@@ -325,7 +325,7 @@ button.ghost {
 
 .legend-row {
   display: grid;
-  grid-template-columns: 0.6rem 6.2rem 1fr;
+  grid-template-columns: 6.2rem 1fr;
   align-items: center;
   gap: 0.55rem;
   padding: 0.3rem 0;
@@ -334,12 +334,6 @@ button.ghost {
 
 .legend-row:last-child {
   border-bottom: 0;
-}
-
-.legend-dot {
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 50%;
 }
 
 .legend-name {
@@ -384,6 +378,6 @@ button.ghost {
     animation: none;
   }
   .legend-row {
-    grid-template-columns: 0.6rem 7rem 1fr;
+    grid-template-columns: 7rem 1fr;
   }
 }
